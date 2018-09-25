@@ -1,0 +1,199 @@
+---
+title: "Model Adjustment Example - Avocadoes"
+author: "Archel Aguilar"
+date: "25 September 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(dplyr)
+library(magrittr)
+library(lubridate)
+library(tibble)
+library(tidyr)
+library(ggplot2)
+library(naniar)
+library(purrr)
+library(Amelia)
+library(plotly)
+library(Metrics)
+library(stringr)
+library(knitr)
+library(kableExtra)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+According to Caffo (2015), Adjustment is about understanding how additional variables that are added to a model impact the other variables. A real world example of this is through an analysis of the Hollywood film industry and a linear model predicting movie sales based on a number of factors. 
+
+## The data
+Firstly, a brief look at the data. Movie data was acquired via web scraping from BoxOfficeMojo.com and combined with additional move data from (The Movie Database) TMDB APIs. 
+
+
+The data contains information such as the movie title, studio, number of theatres, sales, budget, weeks on screen, starting period, runtime, awards, IMDB ratings, genre and classification ratings. 
+
+
+
+
+```{r eval=TRUE, echo=FALSE}
+avo = read.csv("avocado.csv", stringsAsFactors = FALSE)
+
+options(scipen=999)
+
+#https://www.kaggle.com/neuromusic/avocado-prices/home
+
+
+avo %>%
+  View
+
+
+#kable(head(mclean2, 4), caption="first 4 lines") %>%
+#kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+#  scroll_box(width = "100%")
+
+```
+
+
+## Analysis of the relationships
+A good initial way to quickly understand the relationships of the variables is to do run a 'pairs()' on the data. This image shows visually the relationship between each of the variables with each other. This helps with understanding the relationships between the response variable (sales) and other exploratory variables as well as any collinear relationships between the exploratory variables. 
+
+Note that we can only run pairs() on numeric variables, therefore we will only take a subset of the data.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+movies = mclean2 %>%
+  select (
+    #ID,
+    #Title,
+    #Studio,
+    Theatres,
+    Sales,
+    Budget,
+    Weeks_Showing,
+    Year,
+    Opening_Week,
+    Runtime,
+    #Rated,
+    Awards,
+    IMDB_Rating
+  ) %>%
+  mutate(
+    Theatres = log(Theatres),
+    Sales = log(Sales),
+    Budget = log(Budget)
+  )
+```
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+pairs(movies)
+```
+
+You can see that there are some linear relationships between sales, the nubmer of theatres and budget. 
+
+##Sales and the number of theatres
+Let's take a look at the specific relationship between sales and the number of theatres. 
+
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+# show correlation between totTheatreCount and box office sales
+tbreaks = c(0, 10, 100, 1000, 10000, 100000)
+salesBreaks2 = c(0, 1000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 50000000, 1000000000)
+budgetBreaks2 = c(0, 1000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 50000000, 1000000000)
+
+mclean2 %>%
+  filter(Year %in% c(2015:2017)) %>%
+  filter(!is.na(Theatres)) %>%
+  ggplot(aes(y=Sales, x=Theatres)) +
+  geom_jitter(alpha=0.5, width=0.5) + 
+  geom_smooth(method="lm", se=TRUE) +
+  scale_y_log10(labels = scales::dollar, breaks=salesBreaks2) +
+  scale_x_log10(labels = scales::comma, breaks=tbreaks) +
+  coord_cartesian(ylim=c(10, 1100000000), xlim=c(1,100000)) +
+  labs(
+    x = "Theatres Screened",
+    y = "Box office Sales",
+    title = "Relationship between Budget and Box Office Sales (2015-2017)",
+    caption = "Data source: IMDb 2018"
+  ) + 
+  theme_bw() + 
+  theme(
+    text = element_text(family = "Arial", color = "gray25"),
+    axis.text.x = element_text(angle = 60, hjust = 1),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(color = "gray30"),
+    plot.background = element_rect(fill = "gray95"),
+    plot.margin = unit(c(5, 10, 5, 10), units = "mm")
+  )
+
+```
+
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+mclean2 %>%
+  filter(Year %in% c(2015:2017)) %>%
+  filter(!is.na(Theatres)) %>%
+  summarise(correlation = cor(Sales, Theatres, use="complete.obs"))
+
+```
+
+You can see there is a strong linear relationship between the number of theatres and sales. 
+
+## Sales and Budget
+Now let's take a look at the relationship between Sales and Budget.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+mclean2 %>%
+  filter(Year %in% c(2015:2017)) %>%
+  filter(!is.na(Budget)) %>%
+  ggplot(aes(y=Sales, x=Budget)) +
+    theme_bw(base_family = "Arial") +  
+    geom_jitter(alpha=0.5) + 
+    #geom_text(nudge_y=-0.1) +
+    #geom_abline(intercept = 0, colour="red") +
+    #geom_abline(intercept = 0, slope=1.66, colour="#0FC3C7") +
+    geom_smooth(method="lm", se=TRUE) +
+    scale_x_log10(labels = scales::dollar, breaks=budgetBreaks2) +
+    scale_y_log10(labels = scales::dollar, breaks=salesBreaks2) +
+    coord_cartesian(ylim=c(10000, 1100000000), xlim=c(10000,1100000000)) +
+    scale_color_manual(values=c("#808080", "#0FC3C7")) +
+    #expand_limits(x=c(0, 1000000000), y=c(0, 1000000000)) +
+    labs(
+      x = "Movie Budget",
+      y = "Box office Sales",
+      title = "Relationship between Budget and Box Office Sales (2015-2017)",
+      caption = "Data source: IMDb 2018"
+    ) + 
+    theme(
+      text = element_text(family = "Arial", color = "gray25"),
+      axis.text.x = element_text(angle = 60, hjust = 1),
+      plot.subtitle = element_text(size = 12),
+      plot.caption = element_text(color = "gray30"),
+      plot.background = element_rect(fill = "gray95"),
+      plot.margin = unit(c(5, 10, 5, 10), units = "mm")
+    )
+    
+
+mclean2 %>%
+  filter(Year %in% c(2015:2017)) %>%
+  filter(!is.na(Budget)) %>%
+  summarise(correlation = cor(Sales, Budget, use="complete.obs"))
+
+
+```
+There is a moderate linear relationship between Budget and Sales. 
+
+
+
+
+## References
+
+IMDB 2018A, *Box Office Mojo*, viewed 14 August 2018, &lt;[https://www.boxofficemojo.com](https://www.boxofficemojo.com)&gt;.
+
+
+IMDB 2018B, *Weekly Box Office*, Box Office Mojo, viewed 14 August 2018, &lt;[https://www.boxofficemojo.com/weekly/chart/?yr=2018&wk=31&p=.htm](https://www.boxofficemojo.com/weekly/chart/?yr=2018&wk=31&p=.htm)&gt;
+
+Caffo, Brian 2015 Regression Models for Data Science in R,  Leanpub, Victoria
