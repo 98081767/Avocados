@@ -1,5 +1,5 @@
 ---
-title: "Model Adjustment Example - Avocadoes"
+title: "Model Adjustment Example - Avocados"
 author: "Archel Aguilar"
 date: "25 September 2018"
 output: html_document
@@ -21,21 +21,19 @@ library(Metrics)
 library(stringr)
 library(knitr)
 library(kableExtra)
+library(corrplot)
+library(plotly)
+library(reshape2)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Introduction
 
-According to Caffo (2015), Adjustment is about understanding how additional variables that are added to a model impact the other variables. A real world example of this is through an analysis of the Hollywood film industry and a linear model predicting movie sales based on a number of factors. 
+According to Caffo (2015), 'Adjustment' is about understanding how additional variables that are added to a model can distort the other variables. A real world example of this is through an analysis of US Avocado Sales Volume and a linear model predicting total sales volume based on sales volume of Small Hass Avocados (4046), Large Hass Avocados (4225) and Extra Large Hass Avocados (4770). 
 
 ## The data
-Firstly, a brief look at the data. Movie data was acquired via web scraping from BoxOfficeMojo.com and combined with additional move data from (The Movie Database) TMDB APIs. 
-
-
-The data contains information such as the movie title, studio, number of theatres, sales, budget, weeks on screen, starting period, runtime, awards, IMDB ratings, genre and classification ratings. 
-
-
+Firstly, let's take a brief look at the data. The data contains monthly US sales volumes of Hass Avocados from 2015 to 2018. It has the average price per Avocado, Total Volume, Volume by type (Small-4046, Large-4225, XLarge-4770), Total Bags sold and total bags sold by type.
 
 
 ```{r eval=TRUE, echo=FALSE}
@@ -46,154 +44,323 @@ options(scipen=999)
 #https://www.kaggle.com/neuromusic/avocado-prices/home
 
 
-avo %>%
-  View
+avo = avo %>%
+  rename(
+        Week = X,
+        X4046 = X4046,
+         X4225 = X4225,
+         X4770 = X4770,
+         TotalVolume = Total.Volume,
+         TotalBags = Total.Bags,
+         SmallBags = Small.Bags,
+         LargeBags = Large.Bags,
+         XLBags = XLarge.Bags
+  )
+
+mavo = avo %>%
+  filter(type=="conventional") %>%
+  separate(Date, c("Year", "Month", "Day"), sep="-") %>%
+  group_by(Year, Month, region) %>%
+  summarize(
+    AvgPrice = mean(AveragePrice),
+    TotalVolume = sum(TotalVolume),
+    X4046 = sum(X4046),
+    X4225 = sum(X4225),
+    X4770 = sum(X4770), 
+    TotalBags = sum(TotalBags),
+    SmallBags = sum(SmallBags), 
+    LargeBags = sum(LargeBags),
+    XLBags = sum(XLBags)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    Year = as.numeric(Year),
+    Month = as.numeric(Month)
+  ) 
 
 
-#kable(head(mclean2, 4), caption="first 4 lines") %>%
-#kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
-#  scroll_box(width = "100%")
+mavo_us = mavo %>%
+  filter(region == "TotalUS") 
+
+
+kable(head(mavo_us, 4), caption="first 4 lines") %>%
+kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(width = "100%")
 
 ```
 
 
 ## Analysis of the relationships
-A good initial way to quickly understand the relationships of the variables is to do run a 'pairs()' on the data. This image shows visually the relationship between each of the variables with each other. This helps with understanding the relationships between the response variable (sales) and other exploratory variables as well as any collinear relationships between the exploratory variables. 
+A good initial way to quickly understand the relationships of the variables is to do a 'pairs()' on the data. This image  visually shows the relationship between each of the variables with each other. This also helps with understanding the relationships between the response variable (Total Volume), other exploratory variables and any collinear relationships between the exploratory variables. 
 
 Note that we can only run pairs() on numeric variables, therefore we will only take a subset of the data.
+```{r eval=FALSE, echo=TRUE, message=FALSE, warning=FALSE}
+pairs(avocados)
+```
 
 ```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
 
-movies = mclean2 %>%
-  select (
-    #ID,
-    #Title,
-    #Studio,
-    Theatres,
-    Sales,
-    Budget,
-    Weeks_Showing,
-    Year,
-    Opening_Week,
-    Runtime,
-    #Rated,
-    Awards,
-    IMDB_Rating
-  ) %>%
-  mutate(
-    Theatres = log(Theatres),
-    Sales = log(Sales),
-    Budget = log(Budget)
-  )
-```
-
-```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
-pairs(movies)
-```
-
-You can see that there are some linear relationships between sales, the nubmer of theatres and budget. 
-
-##Sales and the number of theatres
-Let's take a look at the specific relationship between sales and the number of theatres. 
-
-
-```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
-
-# show correlation between totTheatreCount and box office sales
-tbreaks = c(0, 10, 100, 1000, 10000, 100000)
-salesBreaks2 = c(0, 1000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 50000000, 1000000000)
-budgetBreaks2 = c(0, 1000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 50000000, 1000000000)
-
-mclean2 %>%
-  filter(Year %in% c(2015:2017)) %>%
-  filter(!is.na(Theatres)) %>%
-  ggplot(aes(y=Sales, x=Theatres)) +
-  geom_jitter(alpha=0.5, width=0.5) + 
-  geom_smooth(method="lm", se=TRUE) +
-  scale_y_log10(labels = scales::dollar, breaks=salesBreaks2) +
-  scale_x_log10(labels = scales::comma, breaks=tbreaks) +
-  coord_cartesian(ylim=c(10, 1100000000), xlim=c(1,100000)) +
-  labs(
-    x = "Theatres Screened",
-    y = "Box office Sales",
-    title = "Relationship between Budget and Box Office Sales (2015-2017)",
-    caption = "Data source: IMDb 2018"
-  ) + 
-  theme_bw() + 
-  theme(
-    text = element_text(family = "Arial", color = "gray25"),
-    axis.text.x = element_text(angle = 60, hjust = 1),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(color = "gray30"),
-    plot.background = element_rect(fill = "gray95"),
-    plot.margin = unit(c(5, 10, 5, 10), units = "mm")
-  )
-
-```
-
-
-```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
-mclean2 %>%
-  filter(Year %in% c(2015:2017)) %>%
-  filter(!is.na(Theatres)) %>%
-  summarise(correlation = cor(Sales, Theatres, use="complete.obs"))
-
-```
-
-You can see there is a strong linear relationship between the number of theatres and sales. 
-
-## Sales and Budget
-Now let's take a look at the relationship between Sales and Budget.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
-mclean2 %>%
-  filter(Year %in% c(2015:2017)) %>%
-  filter(!is.na(Budget)) %>%
-  ggplot(aes(y=Sales, x=Budget)) +
-    theme_bw(base_family = "Arial") +  
-    geom_jitter(alpha=0.5) + 
-    #geom_text(nudge_y=-0.1) +
-    #geom_abline(intercept = 0, colour="red") +
-    #geom_abline(intercept = 0, slope=1.66, colour="#0FC3C7") +
-    geom_smooth(method="lm", se=TRUE) +
-    scale_x_log10(labels = scales::dollar, breaks=budgetBreaks2) +
-    scale_y_log10(labels = scales::dollar, breaks=salesBreaks2) +
-    coord_cartesian(ylim=c(10000, 1100000000), xlim=c(10000,1100000000)) +
-    scale_color_manual(values=c("#808080", "#0FC3C7")) +
-    #expand_limits(x=c(0, 1000000000), y=c(0, 1000000000)) +
-    labs(
-      x = "Movie Budget",
-      y = "Box office Sales",
-      title = "Relationship between Budget and Box Office Sales (2015-2017)",
-      caption = "Data source: IMDb 2018"
-    ) + 
-    theme(
-      text = element_text(family = "Arial", color = "gray25"),
-      axis.text.x = element_text(angle = 60, hjust = 1),
-      plot.subtitle = element_text(size = 12),
-      plot.caption = element_text(color = "gray30"),
-      plot.background = element_rect(fill = "gray95"),
-      plot.margin = unit(c(5, 10, 5, 10), units = "mm")
-    )
     
+  mavo_us %>%
+      select(AvgPrice,
+             TotalVolume,
+             X4046,
+             X4225,
+             X4770,
+             TotalBags,
+             SmallBags,
+             LargeBags,
+             XLBags,
+             Month,
+             Year
+      ) %>%
+      pairs()
+```
 
-mclean2 %>%
-  filter(Year %in% c(2015:2017)) %>%
-  filter(!is.na(Budget)) %>%
-  summarise(correlation = cor(Sales, Budget, use="complete.obs"))
+
+You can see that there are some linear relationships between Total Volume and the different types of Avocados.
+
+###Total Sales Volume and Small Avocados
+Let's take a look at the specific relationship between Total Volume and Small Avocados (4046). 
+
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+totVolBreaks = c(0, 50000000, 100000000, 150000000, 200000000)
+nomVolBreaks = c(0, 50000000, 100000000, 150000000, 200000000)    
+    
+mavo_us %>%
+  ggplot(aes(y=TotalVolume, x=X4046)) +
+    geom_point() +
+    geom_smooth(method="lm", se=FALSE) + 
+    coord_cartesian(ylim=c(75000000, 210000000), xlim=c(30000000,120000000)) +
+    scale_x_continuous(labels = scales::comma, breaks=nomVolBreaks) +
+    scale_y_continuous(labels = scales::comma, breaks=nomVolBreaks) +
+    theme_bw() +
+    labs(
+    x = "Volume of Small Avocados (4046)",
+    y = "Total US Volume",
+    #title = "Relationship between Total Volume of Avocados sold in the US and Small Avocados",
+    caption = "Data source: Kaggle: https://www.kaggle.com/neuromusic/avocado-prices/home"
+  ) 
+
+```
+
+
+Correlation
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+cor(mavo_us$TotalVolume, mavo_us$X4046)
+
+```
+
+You can see there is a strong linear relationship between total sales volume and total sales volume for small avocados. 
+
+###Total Sales Volume and Large Avocados
+Now let's take a look at the specific relationship between Total Volume and Large Avocados (4225). 
+
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+    
+mavo_us %>%
+  ggplot(aes(y=TotalVolume, x=X4225)) +
+    geom_point() +
+    geom_smooth(method="lm", se=FALSE) + 
+    coord_cartesian(ylim=c(75000000, 210000000), xlim=c(30000000,120000000)) +
+    scale_x_continuous(labels = scales::comma, breaks=nomVolBreaks) +
+    scale_y_continuous(labels = scales::comma, breaks=totVolBreaks) +
+    theme_bw() +
+    labs(
+    x = "Volume of Large Avocados (4225)",
+    y = "Total US Volume",
+    #title = "Relationship between Total Volume of Avocados sold in the US and Large Avocados",
+    caption = "Data source: Kaggle: https://www.kaggle.com/neuromusic/avocado-prices/home"
+  ) 
 
 
 ```
-There is a moderate linear relationship between Budget and Sales. 
 
 
+Correlation
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+cor(mavo_us$TotalVolume, mavo_us$X4225)
+
+```
+
+There is also strong linear relationship between total sales volume and total sales volume for large avocados. 
+
+
+###Total Sales Volume and Extra Large Avocados
+Finally, let's look at the specific relationship between Total Volume and Extra Large Avocados (4770). 
+
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+    
+mavo_us %>%
+  ggplot(aes(y=TotalVolume, x=X4770)) +
+    geom_point() +
+    geom_smooth(method="lm", se=FALSE) + 
+    coord_cartesian(ylim=c(75000000, 210000000), xlim=c(1000000,20000000)) +
+    scale_x_continuous(labels = scales::comma, breaks=c(1000000, 5000000, 10000000, 15000000, 20000000)) +
+    scale_y_continuous(labels = scales::comma, breaks=totVolBreaks) +
+    theme_bw() +
+    labs(
+    x = "Volume of Extra Large Avocados (4770)",
+    y = "Total US Volume",
+    #title = "Relationship between Total Volume of Avocados sold in the US and Extra Large Avocados",
+    caption = "Data source: Kaggle: https://www.kaggle.com/neuromusic/avocado-prices/home"
+  ) 
+
+
+```
+
+
+Correlation
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+cor(mavo_us$TotalVolume, mavo_us$X4770)
+
+```
+
+There is moderate linear relationship between total sales volume and total sales volume for extra large avocados. 
+
+
+##Modelling
+Now that we can see there is a linear relationship between total volume and the small, large and extra large avocados (and the distribution is relatively normal), we can run a linear regression model on the relationship. 
+
+### Total Volume and Small Avocadoes
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+mavo.form = as.formula("TotalVolume ~ X4046") 
+
+mavo.mod = lm(mavo.form, data=mavo_us)
+summary(mavo.mod)
+
+
+```
+
+The coefficient explains that for each small avocado sold, change in total volume will increase by approximately 2.
+
+
+### Total Volume and Large Avocadoes
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+mavo.form = as.formula("TotalVolume ~ X4225") 
+
+mavo.mod = lm(mavo.form, data=mavo_us)
+summary(mavo.mod)
+
+
+```
+
+The coefficient explains that for each large avocado sold, change in total volume will also increase by approximately 2.
+
+### Total Volume and Extra Large Avocadoes
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+mavo.form = as.formula("TotalVolume ~ X4770") 
+
+mavo.mod = lm(mavo.form, data=mavo_us)
+summary(mavo.mod)
+
+
+```
+
+The coefficient explains that for each extra large avocado sold, change in total volume will also increase by approximately 6.
+
+
+### Total Volume with Small & Large Avocadoes
+
+However what happens if you consider both small and large avocados sold together? 
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+mavo.form = as.formula("TotalVolume ~ X4046 + X4225") 
+
+mavo.mod = lm(mavo.form, data=mavo_us)
+summary(mavo.mod)
+
+
+```
+
+Notice how the co-efficients have changed (been adjusted)?
+
+The coefficients were about 2 individually. Now:
+
+For each small avocado sold, the change in total volume will only increase by 1.5, assuming that sales in large avocados do not change. 
+
+And for each large avocado sold, the change in total volume will only increase by 1, assuming that sales in small avocados do not change. 
+ 
+ 
+**What has happened?** 
+
+Adding large and small avocados as features to the model now explains 77% (r-squared) of variance in total volume. This makes sense because these values would make up the total volume, but now you can also see there is a relationship between small and large avocados. Small avocados appears to increase the change of total volume greater than large avocados. Perhaps they sell more smaller ones compared with large ones.
+
+
+
+**Is there a way to visualise this relationship?**
+
+Fortunately, with two features we can visualise this in a 3D graphic using plotly. 
+
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+graph_reso = 1000000
+
+#Setup Axis
+axis_x = seq(min(mavo_us$X4046), max(mavo_us$X4046), by = graph_reso)
+axis_y = seq(min(mavo_us$X4225), max(mavo_us$X4225), by = graph_reso)
+
+#Sample points
+mov_lm_plane = expand.grid(X4046 = axis_x, X4225 = axis_y, KEEP.OUT.ATTRS = F)
+mov_lm_plane$TotalVolume = predict.lm(mavo.mod, newdata = mov_lm_plane)
+mov_lm_plane = acast(mov_lm_plane, X4225 ~ X4046, value.var = "TotalVolume") #y ~ x
+
+
+
+mavo_us %>%
+  plot_ly(z= ~TotalVolume, x=~X4046, y=~X4225, opacity=0.6) %>%
+  #add_surface(x=~X4046, y=~X4225, z=~mov_lm_plane) %>%
+  add_markers() %>%
+  add_trace(x=axis_x, y=axis_y, z=mov_lm_plane, type="surface") %>%
+  layout(
+    xaxis = list(range=nomVolBreaks),
+    yaxis = list(range=nomVolBreaks)
+  )
+
+
+```
+
+From the image, you can see the linear model has changed from a line to a plane in a 3D space. The plane can take on two slopes (co-efficients) exactly as the model describes. If you rotate the image, you can visualise the different slopes. 
+
+
+### Total Volume with Small, Large and Extra Large Avocadoes
+
+Now what happens if you consider all 3 types of avocados sold? 
+
+```{r eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+mavo.form = as.formula("TotalVolume ~ X4046 + X4225 + X4770") 
+
+mavo.mod = lm(mavo.form, data=mavo_us)
+summary(mavo.mod)
+
+
+```
+
+Notice that the coefficient of extra large avocados has changed from 6 to -0.08. Unfortunately, we cannot visualise this easily but it is stating that:
+- For every extra large (4770) sold, total volume will decrease by 0.08 (or close to 0), assuming small and large avocados don't change. 
+
+However, the model also states that this only significant to a 9% level, so this evidence is not very strong. 
+
+## Conclusion
+As you can see adding additional variables to a model can potentially change the coefficients (slopes) in the model. Furthermore, omitting variables that are correlated with the response variable, i.e. excluding either small, large or extra large avocados can lead to bias. Therefore, one must be careful when adding variables to a model and interpreting the model results without first considering other confounding or collinear variables.
 
 
 ## References
 
-IMDB 2018A, *Box Office Mojo*, viewed 14 August 2018, &lt;[https://www.boxofficemojo.com](https://www.boxofficemojo.com)&gt;.
+Caffo, Brian 2015, *Regression Models for Data Science in R*,  Leanpub, Victoria
 
+Kiggins, Justin 2018, *Avocado Prices*, Kaggle, viewed 29 August 2018, &lt;[https://www.kaggle.com/neuromusic/avocado-prices/home)&gt;
 
-IMDB 2018B, *Weekly Box Office*, Box Office Mojo, viewed 14 August 2018, &lt;[https://www.boxofficemojo.com/weekly/chart/?yr=2018&wk=31&p=.htm](https://www.boxofficemojo.com/weekly/chart/?yr=2018&wk=31&p=.htm)&gt;
-
-Caffo, Brian 2015 Regression Models for Data Science in R,  Leanpub, Victoria
